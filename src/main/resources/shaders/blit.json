@@ -1,0 +1,6 @@
+{
+  "sources": {
+    "vertex": "blit.vsh",
+    "fragment": "blit.fsh"
+  }
+}

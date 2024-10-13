@@ -1,0 +1,25 @@
+{
+  "advance": 6,
+  "spaces": {
+    " ": 4
+  },
+  "chars": [
+    "0123456789ABCDEF",
+    "GHIJKLMNOPQRSTUV",
+    "WXYZabcdefghijkl",
+    "mnopqrstuvwxyz.,",
+    "!\"'%()+-/<>:_\\|{",
+    "}[]=?*^«»"
+  ],
+  "chars_advance_override": {
+    "I": 4,
+    "i": 2,
+    "l": 3,
+    "t": 4,
+    ".": 2,
+    ",": 2,
+    "!": 2,
+    "\"": 4,
+    "'": 2
+  }
+}

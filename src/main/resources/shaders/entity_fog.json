@@ -1,0 +1,7 @@
+{
+  "sources": {
+    "vertex": "entity.vsh",
+    "fragment": "entity.fsh"
+  },
+  "defines": {"flags": ["FOG"]}
+}
