@@ -34,7 +34,7 @@ public class ZombieModel extends Model<ZombieEntity> {
                 org.joml.Math.lerp(entity.prevPosition.y, entity.position.y, tickDelta),
                 org.joml.Math.lerp(entity.prevPosition.z, entity.position.z, tickDelta));
         float size = 1.86f / 32f;
-        double time = (double) TimeUtils.getCurrentMillis() / 1E3d * 10d + (double)entity.timeOffs;
+        double time = (double) TimeUtils.millisTime() / 1E3d * 10d + (double)entity.timeOffs;
         float yy = (float)(-Math.abs(Math.sin(time * 0.6662d)) * 5d - 23d);
         matrices.scale(1f, -1f, 1f);
         matrices.scale(size, size, size);

@@ -1,0 +1,6 @@
+{
+  "sources": {
+    "vertex": "position.vert.glsl",
+    "fragment": "position.frag.glsl"
+  }
+}

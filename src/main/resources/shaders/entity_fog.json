@@ -1,7 +1,7 @@
 {
   "sources": {
-    "vertex": "entity.vsh",
-    "fragment": "entity.fsh"
+    "vertex": "entity.vert.glsl",
+    "fragment": "entity.frag.glsl"
   },
   "defines": {"flags": ["FOG"]}
 }

@@ -21,5 +21,19 @@ public class Blocks {
         COBBLESTONE = new Block(4, new int[]{1});
         PLANKS = new Block(5, new int[]{4});
         SAPLING = new SaplingBlock(6, 6);
+
+        for (Block block : blocks) {
+            if (block.model == null) {
+                block.model = switch (block.numericId) {
+                    case 1 -> Block.Model.load("stone");
+                    case 2 -> Block.Model.load("grass");
+                    case 3 -> Block.Model.load("dirt");
+                    case 4 -> Block.Model.load("cobblestone");
+                    case 5 -> Block.Model.load("planks");
+                    case 6 -> Block.Model.load("sapling");
+                    default -> null;
+                };
+            }
+        }
     }
 }

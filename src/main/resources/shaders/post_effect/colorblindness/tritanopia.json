@@ -1,0 +1,11 @@
+{
+  "sources": {
+    "vertex": "post_effect/post_effect.vert.glsl",
+    "fragment": "post_effect/colorblindness/colorblindness.frag.glsl"
+  },
+  "defines": {
+    "values": {
+      "COLORBLIND_MODE": 4
+    }
+  }
+}

@@ -10,6 +10,8 @@ import me.kalmemarq.entity.model.ZombieModel;
 import me.kalmemarq.particle.Particle;
 import me.kalmemarq.particle.ParticleSystem;
 import me.kalmemarq.render.*;
+import me.kalmemarq.render.NativeImage.Mirroring;
+import me.kalmemarq.render.NativeImage.PixelFormat;
 import me.kalmemarq.render.vertex.BufferBuilder;
 import me.kalmemarq.render.vertex.VertexBuffer;
 import me.kalmemarq.render.vertex.VertexLayout;
@@ -33,13 +35,18 @@ import org.lwjgl.system.MemoryStack;
 import org.lwjgl.system.MemoryUtil;
 
 import java.nio.ByteBuffer;
+import java.nio.file.Path;
+import java.time.LocalDateTime;
+import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
 import java.util.Iterator;
 import java.util.List;
 
-public class Game implements Runnable {
+public class Game implements Runnable, Window.EventHandler {
     private static final Logger LOGGER = LogManager.getLogger("Main");
+    private static final String VERSION = "c0.0.9a";
     private static final float MOUSE_SENSITIVITY = 0.08f;
+    private static final DateTimeFormatter SCREENSHOT_DATE_FORMATTER = DateTimeFormatter.ofPattern("yyyy-MM-dd_HH-mm-ss-SSS");
 
     private static int entityRenderCount;
 
@@ -65,6 +72,7 @@ public class Game implements Runnable {
     private final List<ZombieEntity> zombies = new ArrayList<>();
     private final ZombieModel zombieModel = new ZombieModel();
     private boolean renderEntityHitboxes = false;
+    private boolean renderChunkBoxes = false;
     private final ParticleSystem particleSystem = new ParticleSystem();
     private boolean rendeInfoOverlay;
     private TextRenderer textRenderer;
@@ -89,13 +97,10 @@ public class Game implements Runnable {
 
     @Override
     public void run() {
-        this.window = new Window(640, 480, "mc-c0.0.9a");
-        GLFW.glfwSetCursorPosCallback(this.window.getHandle(), (_w, x, y) -> this.onCursorPos(x, y));
-        GLFW.glfwSetKeyCallback(this.window.getHandle(), (_w, k, sc, a, m) -> this.onKey(k, a));
-        GLFW.glfwSetMouseButtonCallback(this.window.getHandle(), (_w, b, a, m) -> this.onMouseButton(b, a));
+        this.window = new Window(640, 480, VERSION);
+        this.window.setIcon();
+        this.window.addEventHandler(this);
 
-        this.window.getImGuiLayer().init();
-        
         LOGGER.info("LWJGL {}", Version.getVersion());
         LOGGER.info("GLFW {}", GLFW.glfwGetVersionString());
         LOGGER.info("OpenGL {}", GL11.glGetString(GL11.GL_VERSION));
@@ -112,7 +117,7 @@ public class Game implements Runnable {
         this.charTexture = new Texture();
         this.charTexture.load(IOUtils.getResourcesPath().resolve("textures/char.png"));
         
-        this.selectionShader = new Shader("selection");
+        this.selectionShader = new Shader("position");
         this.terrainShader = new Shader("terrain");
         this.terrainShadowShader = new Shader("terrain_fog");
         this.entityShader = new Shader("entity");
@@ -135,19 +140,19 @@ public class Game implements Runnable {
         this.window.grabMouse();
         
         this.window.show();
-        long lastTime = TimeUtils.getCurrentMillis();
+        long lastTime = TimeUtils.millisTime();
         int frameCounter = 0;
 
         try {
             GL11.glClearColor(0.5f, 0.8f, 1f, 1f);
 
             int tickCounter = 0;
-            long prevTimeMillis = TimeUtils.getCurrentMillis();
+            long prevTimeMillis = TimeUtils.millisTime();
             int ticksPerSecond = 20;
             float tickDelta = 0;
 
             while (!this.window.shouldClose()) {
-                long now = TimeUtils.getCurrentMillis();
+                long now = TimeUtils.millisTime();
                 float lastFrameDuration = (float)(now - prevTimeMillis) / (1000f / ticksPerSecond);
                 prevTimeMillis = now;
                 tickDelta += lastFrameDuration;
@@ -171,6 +176,7 @@ public class Game implements Runnable {
                     if (ImGui.begin("Info", ImGuiWindowFlags.NoDecoration | ImGuiWindowFlags.AlwaysAutoResize | ImGuiWindowFlags.NoSavedSettings | ImGuiWindowFlags.NoFocusOnAppearing | ImGuiWindowFlags.NoNav)) {
                         ImGui.text(this.fps + " FPS " + this.tps + " TPS");
                         ImGui.text("E: " + entityRenderCount + "/" + this.zombies.size() + " P: " + ParticleSystem.rendered + "/" + this.particleSystem.particles.size() + " C: " + WorldRenderer.chunksRendererPerFrame + "/" + this.worldRenderer.getChunkCount() + " x=" + String.format("%.3f", this.player.position.x) + ",y=" + String.format("%.4f", this.player.position.y) + ",z=" + String.format("%.3f", this.player.position.z));
+                        if (this.effect > 0) ImGui.text("Effect: " + this.framebuffer.getPostEffectShaderName(this.effect - 1));
                     }
                     ImGui.end();
 
@@ -180,7 +186,7 @@ public class Game implements Runnable {
                 this.window.update();
                 ++frameCounter;
 
-                while (TimeUtils.getCurrentMillis() - lastTime > 1000L) {
+                while (TimeUtils.millisTime() - lastTime > 1000L) {
                     lastTime += 1000L;
                     this.fps = frameCounter;
                     this.tps = tickCounter;
@@ -208,10 +214,10 @@ public class Game implements Runnable {
             this.charTexture.close();
             this.blockSelectionVertexBuffer.close();
             this.framebuffer.close();
+            this.window.getImGuiLayer().close();
             this.particleSystem.close();
             this.textRenderer.close();
             Tessellator.cleanup();
-            this.window.getImGuiLayer().close();
 
             GL30.glBindVertexArray(0);
             GL30.glBindBuffer(GL20.GL_ARRAY_BUFFER, 0);
@@ -370,6 +376,138 @@ public class Game implements Runnable {
             tessellator.draw();
         }
 
+        if (this.renderChunkBoxes) {
+            int localChunkX = (int) (this.player.position.x) / World.CHUNK_SIZE;
+            int localChunkZ = (int) (this.player.position.z) / World.CHUNK_SIZE;
+
+            if (localChunkX >= 0 && localChunkZ >= 0 && localChunkX < this.world.width / World.CHUNK_SIZE && localChunkZ < this.world.height / World.CHUNK_SIZE) {
+                this.selectionShader.bind();
+                this.selectionShader.setUniform("uProjection", this.projection);
+                this.selectionShader.setUniform("uModelView", this.modelView);
+                this.selectionShader.setUniform("uColor", 1f, 1f, 0f, 1f);
+                tessellator.begin(DrawMode.LINES, VertexLayout.POS);
+
+                for (int i = 0; i < this.world.depth / World.CHUNK_SIZE; ++i) {
+                    float minX = localChunkX * World.CHUNK_SIZE;
+                    float minY = i * World.CHUNK_SIZE;
+                    float minZ = localChunkZ * World.CHUNK_SIZE;
+
+                    float maxX = localChunkX * World.CHUNK_SIZE + World.CHUNK_SIZE;
+                    float maxY = i * World.CHUNK_SIZE + World.CHUNK_SIZE;
+                    float maxZ = localChunkZ * World.CHUNK_SIZE + World.CHUNK_SIZE;
+
+                    int segs = World.CHUNK_SIZE / 2;
+
+                    for (int ySegs = 0; ySegs < segs; ++ ySegs) {
+                        builder.vertex(minX, minY + ySegs * 2, minZ);
+                        builder.vertex(maxX, minY + ySegs * 2, minZ);
+
+                        builder.vertex(minX + ySegs * 2, minY, minZ);
+                        builder.vertex(minX + ySegs * 2, maxY, minZ);
+
+                        builder.vertex(minX + ySegs * 2, minY, maxZ);
+                        builder.vertex(minX + ySegs * 2, maxY, maxZ);
+
+                        builder.vertex(minX, minY, minZ + ySegs * 2);
+                        builder.vertex(minX, maxY, minZ + ySegs * 2);
+
+                        builder.vertex(maxX, minY, minZ + ySegs * 2);
+                        builder.vertex(maxX, maxY, minZ + ySegs * 2);
+
+                        builder.vertex(minX, minY + ySegs * 2, minZ);
+                        builder.vertex(minX, minY + ySegs * 2, maxZ);
+
+                        builder.vertex(maxX, minY + ySegs * 2, minZ);
+                        builder.vertex(maxX, minY + ySegs * 2, maxZ);
+
+                        builder.vertex(minX, minY + ySegs * 2, maxZ);
+                        builder.vertex(maxX, minY + ySegs * 2, maxZ);
+                    }
+                }
+
+                tessellator.draw();
+                this.selectionShader.setUniform("uColor", 0f, 0f, 1f, 1f);
+    
+                tessellator.begin(DrawMode.LINES, VertexLayout.POS);
+    
+                for (int i = 0; i < this.world.depth / World.CHUNK_SIZE; ++i) {
+                    float minX = localChunkX * World.CHUNK_SIZE;
+                    float minY = i * World.CHUNK_SIZE;
+                    float minZ = localChunkZ * World.CHUNK_SIZE;
+
+                    float maxX = localChunkX * World.CHUNK_SIZE + World.CHUNK_SIZE;
+                    float maxY = i * World.CHUNK_SIZE + World.CHUNK_SIZE;
+                    float maxZ = localChunkZ * World.CHUNK_SIZE + World.CHUNK_SIZE;
+
+                    this.renderBox(builder, minX, minY, minZ, maxX, maxY, maxZ);
+                }
+                
+                tessellator.draw();
+
+                this.selectionShader.setUniform("uColor", 1f, 0f, 0f, 1f);
+                tessellator.begin(DrawMode.LINES, VertexLayout.POS);
+
+                for (int i = 0; i < this.world.depth / World.CHUNK_SIZE; ++i) {
+                    float minX = (localChunkX - 1) * World.CHUNK_SIZE;
+                    float minY = i * World.CHUNK_SIZE;
+                    float minZ = localChunkZ * World.CHUNK_SIZE;
+
+                    float maxX = (localChunkX - 1) * World.CHUNK_SIZE + World.CHUNK_SIZE;
+                    float maxY = i * World.CHUNK_SIZE + World.CHUNK_SIZE;
+                    float maxZ = localChunkZ * World.CHUNK_SIZE + World.CHUNK_SIZE;
+
+                    if (minX < 0) continue;
+
+                    this.renderBox(builder, minX, minY, minZ, maxX, maxY, maxZ);
+                }
+
+                for (int i = 0; i < this.world.depth / World.CHUNK_SIZE; ++i) {
+                    float minX = localChunkX * World.CHUNK_SIZE;
+                    float minY = i * World.CHUNK_SIZE;
+                    float minZ = (localChunkZ - 1) * World.CHUNK_SIZE;
+
+                    float maxX = localChunkX * World.CHUNK_SIZE + World.CHUNK_SIZE;
+                    float maxY = i * World.CHUNK_SIZE + World.CHUNK_SIZE;
+                    float maxZ = (localChunkZ - 1) * World.CHUNK_SIZE + World.CHUNK_SIZE;
+
+                    if (minZ < 0) continue;
+
+                    this.renderBox(builder, minX, minY, minZ, maxX, maxY, maxZ);
+                }
+
+                for (int i = 0; i < this.world.depth / World.CHUNK_SIZE; ++i) {
+                    float minX = (localChunkX + 1) * World.CHUNK_SIZE;
+                    float minY = i * World.CHUNK_SIZE;
+                    float minZ = localChunkZ * World.CHUNK_SIZE;
+
+                    float maxX = (localChunkX + 1) * World.CHUNK_SIZE + World.CHUNK_SIZE;
+                    float maxY = i * World.CHUNK_SIZE + World.CHUNK_SIZE;
+                    float maxZ = localChunkZ * World.CHUNK_SIZE + World.CHUNK_SIZE;
+
+                    if (maxX >= world.width) continue;
+
+                    this.renderBox(builder, minX, minY, minZ, maxX, maxY, maxZ);
+                }
+
+                for (int i = 0; i < this.world.depth / World.CHUNK_SIZE; ++i) {
+                    float minX = localChunkX * World.CHUNK_SIZE;
+                    float minY = i * World.CHUNK_SIZE;
+                    float minZ = (localChunkZ + 1) * World.CHUNK_SIZE;
+
+                    float maxX = localChunkX * World.CHUNK_SIZE + World.CHUNK_SIZE;
+                    float maxY = i * World.CHUNK_SIZE + World.CHUNK_SIZE;
+                    float maxZ = (localChunkZ + 1) * World.CHUNK_SIZE + World.CHUNK_SIZE;
+
+                    if (maxZ >= world.height) continue;
+
+                    this.renderBox(builder, minX, minY, minZ, maxX, maxY, maxZ);
+                }
+                tessellator.draw();
+
+                this.selectionShader.setUniform("uColor", 1f, 1f, 1f, 1f);
+            }
+        }
+
         if (this.blockHitResult != null) {
             MatrixStack matrices = MatrixStack.INSTANCE;
 
@@ -393,8 +531,8 @@ public class Game implements Runnable {
                 this.entityShader.bind();
                 this.entityShader.setUniform("uProjection", this.projection);
                 this.entityShader.setUniform("uModelView", this.modelView);
-                float brightness = (float) Math.sin((double) TimeUtils.getCurrentMillis() / 100d) * 0.2f + 0.8f;
-                this.entityShader.setUniform("uColor", brightness, brightness, brightness, (float)Math.sin((double)TimeUtils.getCurrentMillis() / 200.0d) * 0.2f + 0.5f);
+                float brightness = (float) Math.sin((double) TimeUtils.millisTime() / 100d) * 0.2f + 0.8f;
+                this.entityShader.setUniform("uColor", brightness, brightness, brightness, (float)Math.sin((double)TimeUtils.millisTime() / 200.0d) * 0.2f + 0.5f);
                 this.terrainTexture.bind(0);
                 this.entityShader.setUniform("uSampler0", 0);
                 
@@ -405,7 +543,7 @@ public class Game implements Runnable {
                 GL11.glBlendFunc(GL11.GL_SRC_ALPHA, GL11.GL_ONE);
                 this.selectionShader.bind();
                 this.selectionShader.setUniform("uProjection", this.projection);
-                this.selectionShader.setUniform("uColor", 1f, 1f, 1f, (float)Math.sin((double)TimeUtils.getCurrentMillis() / 100.0d) * 0.2f + 0.4f);
+                this.selectionShader.setUniform("uColor", 1f, 1f, 1f, (float)Math.sin((double)TimeUtils.millisTime() / 100.0d) * 0.2f + 0.4f);
                 this.selectionShader.setUniform("uModelView", this.modelView);
     
                 this.blockSelectionVertexBuffer.bind();
@@ -422,7 +560,6 @@ public class Game implements Runnable {
         GL11.glViewport(0, 0, this.window.getWidth(), this.window.getHeight());
         GL11.glClear(GL11.GL_COLOR_BUFFER_BIT);
 
-//        this.framebuffer.blitTo(0, 0, 0, this.window.getWidth(), this.window.getHeight());
         this.framebuffer.draw(this.effect);
     }
 
@@ -514,7 +651,8 @@ public class Game implements Runnable {
         builder.vertex(maxX, maxY, minZ); builder.vertex(maxX, maxY, maxZ);
     }
 
-    private void onCursorPos(double x, double y) {
+    @Override
+    public void onCursorPos(double x, double y) {
         this.mouse[2] = x - this.mouse[0];
         this.mouse[3] = y - this.mouse[1];
         this.mouse[0] = x;
@@ -530,7 +668,8 @@ public class Game implements Runnable {
         this.mouse[3] = 0;
     }
 
-    private void onMouseButton(int button, int action) {
+    @Override
+    public void onMouseButton(int button, int action) {
         if (action != GLFW.GLFW_RELEASE && this.blockHitResult != null) {
             if (button == 1) {
                 this.clickMode = (this.clickMode + 1) % 2;
@@ -554,7 +693,8 @@ public class Game implements Runnable {
         }
     }
 
-    private void onKey(int key, int action) {
+    @Override
+    public void onKey(int key, int action) {
         if (action == GLFW.GLFW_PRESS) {
             if (key == GLFW.GLFW_KEY_ESCAPE) {
                 GLFW.glfwSetWindowShouldClose(this.window.getHandle(), true);
@@ -572,10 +712,12 @@ public class Game implements Runnable {
                 this.player.noClip = !this.player.noClip;
             } else if (key == GLFW.GLFW_KEY_F3) {
                 this.rendeInfoOverlay = !this.rendeInfoOverlay;
+            } else if (key == GLFW.GLFW_KEY_F7) {
+                this.renderChunkBoxes = !this.renderChunkBoxes;
             } else if (key == GLFW.GLFW_KEY_F8) {
                 this.renderEntityHitboxes = !this.renderEntityHitboxes;
             } else if (key == GLFW.GLFW_KEY_F9) {
-                this.effect = (this.effect + 1) % 6;
+                this.effect = (this.effect + 1) % (this.framebuffer.getPostEffectShaderCount() + 1);
             } else if (key == GLFW.GLFW_KEY_1) {
                 this.selectedBlockId = 1;
             } else if (key == GLFW.GLFW_KEY_2) {
@@ -598,6 +740,14 @@ public class Game implements Runnable {
                 } else {
                     this.capturedFrustum = null;
                 }
+            } else if (key == GLFW.GLFW_KEY_F2) {
+                NativeImage image = NativeImage.readFromTexture(this.framebuffer.getColorAttachmentTxr(), this.framebuffer.getWidth(), this.framebuffer.getHeight(), PixelFormat.RGB);
+                image.flip(Mirroring.VERTICAL);
+                Path screenshotsPath = Path.of("screenshots");
+                if (IOUtils.ensureDirectory(screenshotsPath)) {
+                    image.saveTo(screenshotsPath.resolve(SCREENSHOT_DATE_FORMATTER.format(LocalDateTime.now()) + ".png"));
+                }
+                image.close();
             }
         }
     }

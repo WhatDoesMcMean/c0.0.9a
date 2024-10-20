@@ -1,0 +1,6 @@
+{
+  "sources": {
+    "vertex": "post_effect/post_effect.vert.glsl",
+    "fragment": "post_effect/mexico.frag.glsl"
+  }
+}

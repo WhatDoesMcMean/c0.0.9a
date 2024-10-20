@@ -1,6 +1,0 @@
-{
-  "sources": {
-    "vertex": "selection.vsh",
-    "fragment": "selection.fsh"
-  }
-}

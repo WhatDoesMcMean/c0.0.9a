@@ -1,0 +1,15 @@
+{
+  "cuboids": [
+    {
+      "bounds": [0, 0, 0, 16, 16, 16],
+      "faces": {
+        "down": { "texture_index": 2 },
+        "up": { "texture_index": 2 },
+        "north": { "texture_index": 2 },
+        "south": { "texture_index": 2 },
+        "west": { "texture_index": 2 },
+        "east": { "texture_index": 2 }
+      }
+    }
+  ]
+}

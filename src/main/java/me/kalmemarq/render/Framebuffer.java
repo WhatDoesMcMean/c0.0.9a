@@ -3,7 +3,10 @@ package me.kalmemarq.render;
 import me.kalmemarq.render.vertex.BufferBuilder;
 import me.kalmemarq.render.vertex.VertexBuffer;
 import me.kalmemarq.render.vertex.VertexLayout;
+import me.kalmemarq.util.IOUtils;
 
+import org.apache.logging.log4j.LogManager;
+import org.apache.logging.log4j.Logger;
 import org.lwjgl.glfw.GLFW;
 import org.lwjgl.opengl.GL30;
 import org.lwjgl.opengl.GL45;
@@ -11,9 +14,14 @@ import org.lwjgl.system.MemoryStack;
 import org.lwjgl.system.MemoryUtil;
 
 import java.io.Closeable;
+import java.io.IOException;
 import java.nio.ByteBuffer;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.util.List;
 
 public class Framebuffer implements Closeable {
+    private static final Logger LOGGER = LogManager.getLogger("Framebuffer");
     private int fbo = -1;
     private int colorAttachmentTxr;
     private int depthTxr;
@@ -30,11 +38,26 @@ public class Framebuffer implements Closeable {
     private final Shader blitShader;
     private final VertexBuffer vertexBuffer;
 
+    private Shader[] postEffectShaders;
+
     public Framebuffer(int width, int height) {
         this.colorAttachmentMode = AttachmentMode.TEXTURE;
         this.depthAttachmentMode = AttachmentMode.RENDERBUFFER;
 
         this.blitShader = new Shader("blit");
+
+        try {
+            List<Path> paths = Files.find(IOUtils.getResourcesPath().resolve("shaders/post_effect"), 100, (p, a) -> p.toString().endsWith(".json")).toList();
+            this.postEffectShaders = new Shader[paths.size()];
+            for (int i = paths.size() - 1; i >= 0; --i) {
+                Path path = paths.get(i);
+                this.postEffectShaders[i] = new Shader(IOUtils.getResourcesPath().resolve("shaders").relativize(path).toString().replace("\\", "/").replace(".json", ""));
+            }
+        } catch (IOException e) {
+            e.printStackTrace();
+            this.postEffectShaders = new Shader[0];
+        }
+
         this.vertexBuffer = new VertexBuffer();
 
         try (MemoryStack stack = MemoryStack.stackPush()) {
@@ -50,6 +73,14 @@ public class Framebuffer implements Closeable {
         this.resize(width, height);
     }
 
+    public int getPostEffectShaderCount() {
+        return this.postEffectShaders.length;
+    }
+
+    public String getPostEffectShaderName(int index) {
+        return index < 0 || index >= this.postEffectShaders.length ? "unknown" : this.postEffectShaders[index].getName();
+    }
+
     public void resize(int width, int height) {
         if (width <= 0 || height <= 0) {
             width = 800;
@@ -59,7 +90,7 @@ public class Framebuffer implements Closeable {
         if (this.width == width && this.height == height) {
             return;
         } else {
-            System.out.println("Framebuffer resized");
+            LOGGER.debug("Framebuffer resized");
         }
 
         this.width = width;
@@ -124,12 +155,25 @@ public class Framebuffer implements Closeable {
     }
 
     public void draw(int effect) {
-        this.blitShader.bind();
         GL45.glBindTextureUnit(0, this.colorAttachmentTxr);
-        this.blitShader.setUniform("uSampler0", 0);
-        this.blitShader.setUniform("uEffect", effect);
-        this.blitShader.setUniform("uSize", (float) this.width, (float) this.height);
-        this.blitShader.setUniform("uTime", (float) GLFW.glfwGetTime());
+
+        if (effect >= 1 && effect <= this.postEffectShaders.length) {
+            Shader shader = this.postEffectShaders[effect - 1];
+            shader.bind();
+            shader.setUniform("uSampler0", 0);
+
+            if (shader.getUniformLocation("uTime") != -1) {
+                shader.setUniform("uTime", (float) GLFW.glfwGetTime());
+            }
+
+            if (shader.getUniformLocation("uSize") != -1) {
+                shader.setUniform("uSize", (float) this.width, (float) this.height);
+            }
+        } else {
+            this.blitShader.bind();
+            this.blitShader.setUniform("uSampler0", 0);
+        }
+
         this.vertexBuffer.bind();
         this.vertexBuffer.draw();
     }
@@ -152,8 +196,23 @@ public class Framebuffer implements Closeable {
         return this.fbo;
     }
 
+    public int getWidth() {
+        return this.width;
+    }
+    
+    public int getHeight() {
+        return this.height;
+    }
+    
+    public int getColorAttachmentTxr() {
+        return this.colorAttachmentTxr;
+    }
+
     @Override
     public void close() {
+        for (Shader shader : this.postEffectShaders) {
+            shader.close();
+        }
         this.blitShader.close();
         this.vertexBuffer.close();
         this.dispose();
